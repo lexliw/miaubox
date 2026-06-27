@@ -16,13 +16,13 @@ class Sidebar(ctk.CTkFrame):
     def _build(self):
         t = self.theme
 
-        header = ctk.CTkFrame(self, fg_color=self.theme["surface2"], corner_radius=0)
-        header.pack(fill="x", padx=0, pady=0)
+        # header = ctk.CTkFrame(self, fg_color=self.theme["surface2"], corner_radius=0)
+        # header.pack(fill="x", padx=0, pady=0)
 
-        ctk.CTkLabel(
-            header, text="🐱 MiauBox", font=("JetBrains Mono", 18, "bold"),
-            text_color=t["accent"]
-        ).pack(pady=12)
+        # ctk.CTkLabel(
+        #     header, text="🐱📦 MiauBox", font=("JetBrains Mono", 18, "bold"),
+        #     text_color=t["accent"]
+        # ).pack(pady=12)
 
         self.search_var = ctk.StringVar()
         self.search_var.trace_add("write", lambda *_: self.refresh())

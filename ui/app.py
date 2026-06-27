@@ -15,7 +15,7 @@ class MiauBoxApp(ctk.CTk):
     def __init__(self):
         super().__init__()
         ctk.set_appearance_mode("dark")
-        self.title("MiauBox 🐱")
+        self.title("🐱📦")
         self.geometry("1280x800")
         self.minsize(900, 600)
         self.configure(fg_color=DARK["bg"])
