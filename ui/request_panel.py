@@ -105,13 +105,14 @@ class RequestPanel(ctk.CTkFrame):
         )
         self.tab_view.pack(fill="both", expand=True, padx=0, pady=4)
 
-        for tab in ["Headers", "Params", "Body", "Auth"]:
+        for tab in ["Headers", "Params", "Body", "Auth", "Script"]:
             self.tab_view.add(tab)
 
         self._build_headers_tab()
         self._build_params_tab()
         self._build_body_tab()
         self._build_auth_tab()
+        self._build_script_tab()
 
     def _toggle_details(self):
         t = self.theme
@@ -294,6 +295,76 @@ class RequestPanel(ctk.CTkFrame):
 
             self._auth_fields[key] = var
 
+    def _build_script_tab(self):
+        frame = self.tab_view.tab("Script")
+        t = self.theme
+
+        # ── Pré-requisição ────────────────────────────────────
+        pre_header = ctk.CTkFrame(frame, fg_color=t["surface2"], corner_radius=6)
+        pre_header.pack(fill="x", padx=4, pady=(6, 0))
+
+        ctk.CTkLabel(
+            pre_header,
+            text="⚡ Pré-requisição",
+            font=("JetBrains Mono", 11, "bold"),
+            text_color=t["accent"]
+        ).pack(side="left", padx=10, pady=6)
+
+        ctk.CTkLabel(
+            pre_header,
+            text="Variáveis disponíveis:  request  •  env",
+            font=("JetBrains Mono", 10),
+            text_color=t["text_dim"]
+        ).pack(side="right", padx=10)
+
+        self.pre_script_text = ctk.CTkTextbox(
+            frame, fg_color=t["surface2"], text_color=t["text"],
+            font=("JetBrains Mono", 12), border_color=t["border"],
+            border_width=1, height=120
+        )
+        self.pre_script_text.pack(fill="x", padx=4, pady=(2, 8))
+        self.pre_script_text.insert("1.0", "# Executado antes do envio\n# Exemplo:\n# request.headers[\"X-Timestamp\"] = \"2024-01-01\"\n# env[\"MY_VAR\"] = \"valor\"\n")
+
+        # ── Pós-requisição ────────────────────────────────────
+        pos_header = ctk.CTkFrame(frame, fg_color=t["surface2"], corner_radius=6)
+        pos_header.pack(fill="x", padx=4, pady=(0, 0))
+
+        ctk.CTkLabel(
+            pos_header,
+            text="✅ Pós-requisição",
+            font=("JetBrains Mono", 11, "bold"),
+            text_color=t["success"]
+        ).pack(side="left", padx=10, pady=6)
+
+        ctk.CTkLabel(
+            pos_header,
+            text="Variáveis disponíveis:  request  •  response  •  env",
+            font=("JetBrains Mono", 10),
+            text_color=t["text_dim"]
+        ).pack(side="right", padx=10)
+
+        self.pos_script_text = ctk.CTkTextbox(
+            frame, fg_color=t["surface2"], text_color=t["text"],
+            font=("JetBrains Mono", 12), border_color=t["border"],
+            border_width=1, height=120
+        )
+        self.pos_script_text.pack(fill="x", padx=4, pady=(2, 8))
+        self.pos_script_text.insert("1.0", "# Executado após receber a resposta\n# Exemplo:\n# if response.status_code == 200:\n#     env[\"TOKEN\"] = response.json()[\"token\"]\n")
+
+        # ── Log de execução ───────────────────────────────────
+        ctk.CTkLabel(
+            frame, text="📋 Log de execução",
+            font=("JetBrains Mono", 11, "bold"),
+            text_color=t["text_dim"]
+        ).pack(anchor="w", padx=4, pady=(4, 0))
+
+        self.script_log_text = ctk.CTkTextbox(
+            frame, fg_color=t["bg"], text_color=t["text_dim"],
+            font=("JetBrains Mono", 11), border_color=t["border"],
+            border_width=1, height=80, state="disabled"
+        )
+        self.script_log_text.pack(fill="x", padx=4, pady=(2, 4))
+
     # ── Dados da request ───────────────────────────────────────────────────
     def get_request_data(self) -> dict:
         return {
@@ -307,6 +378,8 @@ class RequestPanel(ctk.CTkFrame):
             "body_type": self.body_type_var.get(),
             "auth_type": self.auth_type_var.get(),
             "auth_data": {k: v.get() for k, v in self._auth_fields.items()},
+            "pre_script": self.pre_script_text.get("1.0", "end-1c"),
+            "pos_script": self.pos_script_text.get("1.0", "end-1c"),
         }
 
     def load_request(self, data: dict):
@@ -341,6 +414,19 @@ class RequestPanel(ctk.CTkFrame):
             if k in self._auth_fields:
                 self._auth_fields[k].set(v)
 
+        # Scripts
+        self.pre_script_text.delete("1.0", "end")
+        self.pre_script_text.insert("1.0", data.get("pre_script", ""))
+
+        self.pos_script_text.delete("1.0", "end")
+        self.pos_script_text.insert("1.0", data.get("pos_script", ""))
+
+    def write_script_log(self, text: str):
+        self.script_log_text.configure(state="normal")
+        self.script_log_text.delete("1.0", "end")
+        self.script_log_text.insert("1.0", text)
+        self.script_log_text.configure(state="disabled")
+        
     def _send(self):
         self.on_send(self.get_request_data())
 

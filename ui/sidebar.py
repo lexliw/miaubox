@@ -164,15 +164,27 @@ class Sidebar(ctk.CTkFrame):
             self.refresh()
 
     def _delete_collection(self, col_id: int):
+        from tkinter import messagebox
         session = get_session()
         try:
             col = session.query(Collection).filter_by(id=col_id).first()
-            if col:
+            if not col:
+                return
+
+            confirm = messagebox.askyesno(
+                "Deletar Coleção",
+                f"Tem certeza que deseja deletar a coleção '{col.name}'?\n\nTodas as requisições dentro dela também serão deletadas.",
+                icon="warning"
+            )
+
+            if confirm:
                 session.delete(col)
                 session.commit()
         finally:
             session.close()
-        self.refresh()
+
+        if confirm:
+            self.refresh()
 
     def _show_history(self):
         from ui.history_window import HistoryWindow

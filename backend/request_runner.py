@@ -1,8 +1,31 @@
 import httpx
 import json
 import time
+import traceback
 from backend.database import get_session, RequestHistory
 from backend.env_manager import EnvManager
+
+
+class RequestContext:
+    """Objeto 'request' disponível nos scripts."""
+    def __init__(self, method, url, headers, params, body):
+        self.method = method
+        self.url = url
+        self.headers = headers
+        self.params = params
+        self.body = body
+
+
+class ResponseContext:
+    """Objeto 'response' disponível nos scripts pós-requisição."""
+    def __init__(self, status_code, headers, body_json, raw):
+        self.status_code = status_code
+        self.headers = headers
+        self._json = body_json
+        self.raw = raw
+
+    def json(self):
+        return self._json
 
 
 class RequestRunner:
@@ -19,14 +42,46 @@ class RequestRunner:
         body_type: str,
         auth_type: str,
         auth_data: dict,
+        pre_script: str = "",
+        pos_script: str = "",
     ) -> dict:
+        logs = []
+
+        # ── Resolve variáveis de ambiente ─────────────────
         url = self.env.resolve(url)
         headers = self.env.resolve_dict(headers)
         params = self.env.resolve_dict(params)
         body = self.env.resolve(body)
 
+        # ── Autenticação ──────────────────────────────────
         headers = self._apply_auth(headers, auth_type, auth_data)
 
+        # ── Objeto request para o script ──────────────────
+        req_ctx = RequestContext(method, url, headers, params, body)
+        env_proxy = _EnvProxy(self.env)
+
+        # ── Executa pré-script ────────────────────────────
+        if pre_script and pre_script.strip():
+            log, error = self._run_script(
+                pre_script,
+                sandbox={"request": req_ctx, "env": env_proxy},
+                label="pré-requisição"
+            )
+            logs.append(log)
+            if error:
+                return {
+                    "success": False,
+                    "status_code": 0,
+                    "elapsed_ms": 0,
+                    "error": f"Erro no script pré-requisição:\n{error}",
+                    "headers": {}, "body": None, "raw": "", "size": 0,
+                    "script_log": "\n".join(logs),
+                }
+            # Atualiza headers e url caso o script tenha modificado
+            headers = req_ctx.headers
+            url = req_ctx.url
+
+        # ── Monta kwargs do httpx ─────────────────────────
         kwargs = {"headers": headers, "params": params, "timeout": 30.0}
 
         if body and method in ("POST", "PUT", "PATCH"):
@@ -42,21 +97,49 @@ class RequestRunner:
             else:
                 kwargs["content"] = body.encode()
 
+        # ── Executa requisição ────────────────────────────
         start = time.time()
         try:
             with httpx.Client(follow_redirects=True) as client:
                 response = client.request(method, url, **kwargs)
             elapsed = round((time.time() - start) * 1000, 2)
 
+            body_json = self._try_parse_json(response.text)
+
             result = {
                 "success": True,
                 "status_code": response.status_code,
                 "elapsed_ms": elapsed,
                 "headers": dict(response.headers),
-                "body": self._try_parse_json(response.text),
+                "body": body_json,
                 "raw": response.text,
                 "size": len(response.content),
+                "script_log": "",
             }
+
+            # ── Executa pós-script ────────────────────────
+            if pos_script and pos_script.strip():
+                res_ctx = ResponseContext(
+                    status_code=response.status_code,
+                    headers=dict(response.headers),
+                    body_json=body_json,
+                    raw=response.text,
+                )
+                log, error = self._run_script(
+                    pos_script,
+                    sandbox={
+                        "request": req_ctx,
+                        "response": res_ctx,
+                        "env": env_proxy,
+                    },
+                    label="pós-requisição"
+                )
+                logs.append(log)
+                if error:
+                    result["script_log"] = "\n".join(logs) + f"\n❌ {error}"
+                else:
+                    result["script_log"] = "\n".join(logs)
+
         except Exception as exc:
             elapsed = round((time.time() - start) * 1000, 2)
             result = {
@@ -64,14 +147,40 @@ class RequestRunner:
                 "status_code": 0,
                 "elapsed_ms": elapsed,
                 "error": str(exc),
-                "headers": {},
-                "body": None,
-                "raw": "",
-                "size": 0,
+                "headers": {}, "body": None, "raw": "", "size": 0,
+                "script_log": "\n".join(logs),
             }
 
         self._save_history(method, url, result, body)
         return result
+
+    def _run_script(self, code: str, sandbox: dict, label: str) -> tuple[str, str]:
+        """
+        Executa o script em sandbox isolado.
+        Retorna (log, error_message).
+        """
+        import io
+        import sys
+
+        output = io.StringIO()
+        old_stdout = sys.stdout
+        sys.stdout = output
+
+        error_msg = ""
+        try:
+            exec(compile(code, f"<{label}>", "exec"), sandbox)
+        except Exception:
+            error_msg = traceback.format_exc()
+        finally:
+            sys.stdout = old_stdout
+
+        printed = output.getvalue()
+        log_lines = [f"── {label} ──"]
+        if printed:
+            log_lines.append(printed.strip())
+        if not error_msg:
+            log_lines.append("✅ Executado com sucesso")
+        return "\n".join(log_lines), error_msg
 
     def _apply_auth(self, headers: dict, auth_type: str, auth_data: dict) -> dict:
         if auth_type == "bearer":
@@ -110,3 +219,23 @@ class RequestRunner:
             session.commit()
         finally:
             session.close()
+
+
+class _EnvProxy:
+    """
+    Proxy que permite scripts lerem e escreverem variáveis
+    de ambiente via env["KEY"] = "value".
+    """
+    def __init__(self, env_manager: EnvManager):
+        self._env = env_manager
+
+    def __getitem__(self, key: str) -> str:
+        return self._env._cache.get(key, "")
+
+    def __setitem__(self, key: str, value: str):
+        env_id = self._env._active_env_id
+        if env_id:
+            self._env.upsert_variable(env_id, key, str(value))
+
+    def __repr__(self):
+        return str(self._env._cache)
