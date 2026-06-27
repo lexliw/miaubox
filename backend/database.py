@@ -20,19 +20,21 @@ class Collection(Base):
 
 class SavedRequest(Base):
     __tablename__ = "saved_requests"
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, nullable=False)
-    method = Column(String, default="GET")
-    url = Column(Text, default="")
-    headers = Column(Text, default="{}")
-    params = Column(Text, default="{}")
-    body = Column(Text, default="")
-    body_type = Column(String, default="json")
-    auth_type = Column(String, default="none")
-    auth_data = Column(Text, default="{}")
+    id            = Column(Integer, primary_key=True, index=True)
+    name          = Column(String, nullable=False)
+    method        = Column(String, default="GET")
+    url           = Column(Text, default="")
+    headers       = Column(Text, default="{}")
+    params        = Column(Text, default="{}")
+    body          = Column(Text, default="")
+    body_type     = Column(String, default="json")
+    auth_type     = Column(String, default="none")
+    auth_data     = Column(Text, default="{}")
+    pre_script    = Column(Text, default="")   # ← adicionado
+    pos_script    = Column(Text, default="")   # ← adicionado
     collection_id = Column(Integer, ForeignKey("collections.id"), nullable=True)
-    collection = relationship("Collection", back_populates="requests")
-    created_at = Column(DateTime, default=datetime.utcnow)
+    collection    = relationship("Collection", back_populates="requests")
+    created_at    = Column(DateTime, default=datetime.utcnow)
 
 
 class RequestHistory(Base):

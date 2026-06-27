@@ -123,8 +123,15 @@ class MiauBoxApp(ctk.CTk):
                 body_type=data["body_type"],
                 auth_type=data["auth_type"],
                 auth_data=data["auth_data"],
+                pre_script=data.get("pre_script", ""),
+                pos_script=data.get("pos_script", ""),
             )
-            self.after(0, lambda: self.response_panel.show_result(result))
+
+            def update():
+                self.response_panel.show_result(result)
+                self.request_panel.write_script_log(result.get("script_log", ""))
+
+            self.after(0, update)
 
         threading.Thread(target=run, daemon=True).start()
 
@@ -137,15 +144,17 @@ class MiauBoxApp(ctk.CTk):
             if request_id:
                 req = session.query(SavedRequest).filter_by(id=request_id).first()
                 if req:
-                    req.name = data["name"]
-                    req.method = data["method"]
-                    req.url = data["url"]
-                    req.headers = json.dumps(data["headers"], ensure_ascii=False)
-                    req.params = json.dumps(data["params"], ensure_ascii=False)
-                    req.body = data["body"]
-                    req.body_type = data["body_type"]
-                    req.auth_type = data["auth_type"]
-                    req.auth_data = json.dumps(data["auth_data"], ensure_ascii=False)
+                    req.name       = data["name"]
+                    req.method     = data["method"]
+                    req.url        = data["url"]
+                    req.headers    = json.dumps(data["headers"], ensure_ascii=False)
+                    req.params     = json.dumps(data["params"], ensure_ascii=False)
+                    req.body       = data["body"]
+                    req.body_type  = data["body_type"]
+                    req.auth_type  = data["auth_type"]
+                    req.auth_data  = json.dumps(data["auth_data"], ensure_ascii=False)
+                    req.pre_script = data.get("pre_script", "")   # ← adicionado
+                    req.pos_script = data.get("pos_script", "")   # ← adicionado
                     session.commit()
                     session.refresh(req)
                     self.request_panel._current_id = req.id
@@ -163,7 +172,7 @@ class MiauBoxApp(ctk.CTk):
                 return
 
             col_names = [c.name for c in collections]
-            col_map = {c.name: c.id for c in collections}
+            col_map   = {c.name: c.id for c in collections}
 
         finally:
             session.close()
@@ -214,6 +223,8 @@ class MiauBoxApp(ctk.CTk):
                     body_type=data["body_type"],
                     auth_type=data["auth_type"],
                     auth_data=json.dumps(data["auth_data"], ensure_ascii=False),
+                    pre_script=data.get("pre_script", ""),   # ← adicionado
+                    pos_script=data.get("pos_script", ""),   # ← adicionado
                     collection_id=col_map[col_var.get()],
                 )
                 session2.add(req)
@@ -230,7 +241,7 @@ class MiauBoxApp(ctk.CTk):
             fg_color=t["accent"], hover_color=t["accent2"],
             text_color="white", command=confirm
         ).pack(pady=4)
-   
+
     def _load_request(self, data: dict):
         self.request_panel.load_request(data)
 

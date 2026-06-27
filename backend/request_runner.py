@@ -77,11 +77,15 @@ class RequestRunner:
                     "headers": {}, "body": None, "raw": "", "size": 0,
                     "script_log": "\n".join(logs),
                 }
-            # Atualiza headers e url caso o script tenha modificado
+
+            # ✅ Atualiza TODOS os campos que o script pode ter modificado
+            url     = req_ctx.url
             headers = req_ctx.headers
-            url = req_ctx.url
+            params  = req_ctx.params
+            body    = req_ctx.body  # ← correção principal
 
         # ── Monta kwargs do httpx ─────────────────────────
+        # ✅ Usa o body já atualizado pelo pré-script (se houver)
         kwargs = {"headers": headers, "params": params, "timeout": 30.0}
 
         if body and method in ("POST", "PUT", "PATCH"):
@@ -114,7 +118,7 @@ class RequestRunner:
                 "body": body_json,
                 "raw": response.text,
                 "size": len(response.content),
-                "script_log": "",
+                "script_log": "\n".join(logs),  # <- pré-script já aparece aqui
             }
 
             # ── Executa pós-script ────────────────────────
@@ -155,10 +159,6 @@ class RequestRunner:
         return result
 
     def _run_script(self, code: str, sandbox: dict, label: str) -> tuple[str, str]:
-        """
-        Executa o script em sandbox isolado.
-        Retorna (log, error_message).
-        """
         import io
         import sys
 

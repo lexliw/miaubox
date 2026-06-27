@@ -132,6 +132,8 @@ class Sidebar(ctk.CTkFrame):
             "body_type": req.body_type,
             "auth_type": req.auth_type,
             "auth_data": req.auth_data,
+            "pre_script": req.pre_script or "",   # ← adicionado
+            "pos_script": req.pos_script or "",   # ← adicionado
         }
         self.on_load_request(data)
 
