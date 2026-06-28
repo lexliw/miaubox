@@ -1,5 +1,8 @@
+from ui.syntax_highlight import highlight_python
 import customtkinter as ctk
 import json
+import re
+import keyword
 
 
 class RequestPanel(ctk.CTkFrame):
@@ -365,6 +368,45 @@ class RequestPanel(ctk.CTkFrame):
         )
         self.script_log_text.pack(fill="x", padx=4, pady=(2, 4))
 
+        # Syntax highlighting
+        self.body_type_var.trace_add("write", lambda *_: self._highlight_request_body())
+        self.body_text.bind("<KeyRelease>", lambda _e: self._highlight_request_body())
+        
+        # ── Syntax highlighting ───────────────────────────────
+        self.body_type_var.trace_add("write", lambda *_: self._highlight_request_body())
+
+        def _find_text_widget(ctk_widget):
+            """Desce na hierarquia até achar o tkinter.Text real."""
+            import tkinter as tk
+            for child in ctk_widget.winfo_children():
+                if isinstance(child, tk.Text):
+                    return child
+                found = _find_text_widget(child)
+                if found:
+                    return found
+            return None
+
+        pre_inner = _find_text_widget(self.pre_script_text)
+        pos_inner = _find_text_widget(self.pos_script_text)
+        body_inner = _find_text_widget(self.body_text)
+
+        if pre_inner:
+            pre_inner.bind("<KeyRelease>", lambda _e: self.after_idle(lambda: self._highlight_python(self.pre_script_text)), add="+")
+            pre_inner.bind("<<Paste>>",    lambda _e: self.after_idle(lambda: self._highlight_python(self.pre_script_text)), add="+")
+
+        if pos_inner:
+            pos_inner.bind("<KeyRelease>", lambda _e: self.after_idle(lambda: self._highlight_python(self.pos_script_text)), add="+")
+            pos_inner.bind("<<Paste>>",    lambda _e: self.after_idle(lambda: self._highlight_python(self.pos_script_text)), add="+")
+
+        if body_inner:
+            body_inner.bind("<KeyRelease>", lambda _e: self.after_idle(self._highlight_request_body), add="+")
+            body_inner.bind("<<Paste>>",    lambda _e: self.after_idle(self._highlight_request_body), add="+")
+
+        # aplica o destaque inicial
+        self.after(100, self._highlight_request_body)
+        self.after(100, lambda: self._highlight_python(self.pre_script_text))
+        self.after(100, lambda: self._highlight_python(self.pos_script_text))
+
     # ── Dados da request ───────────────────────────────────────────────────
     def get_request_data(self) -> dict:
         return {
@@ -421,14 +463,155 @@ class RequestPanel(ctk.CTkFrame):
         self.pos_script_text.delete("1.0", "end")
         self.pos_script_text.insert("1.0", data.get("pos_script", ""))
 
+        # Highlight ao carregar
+        self.after(100, self._highlight_request_body)
+        self.after(100, lambda: self._highlight_python(self.pre_script_text))
+        self.after(100, lambda: self._highlight_python(self.pos_script_text))
+
     def write_script_log(self, text: str):
         self.script_log_text.configure(state="normal")
         self.script_log_text.delete("1.0", "end")
         self.script_log_text.insert("1.0", text)
         self.script_log_text.configure(state="disabled")
-        
+
+    def _highlight_script(self, textbox):
+        """Aplica highlight Python no textbox informado."""
+        try:
+            highlight_python(textbox, dark_mode=True)
+        except Exception:
+            pass
+
     def _send(self):
         self.on_send(self.get_request_data())
 
     def _save(self):
         self.on_save(self.get_request_data())
+
+    def _text_widget(self, widget):
+        return getattr(widget, "_textbox", widget)
+
+    def _setup_tags(self, widget, kind: str):
+        txt = self._text_widget(widget)
+        if kind == "python":
+            txt.tag_configure("py_keyword", foreground="#C678DD")
+            txt.tag_configure("py_string",  foreground="#98C379")
+            txt.tag_configure("py_comment", foreground="#7F848E")
+            txt.tag_configure("py_number",  foreground="#D19A66")
+            txt.tag_configure("py_builtin", foreground="#61AFEF")
+            for tag in ["py_keyword", "py_string", "py_comment", "py_number", "py_builtin"]:
+                txt.tag_raise(tag)
+        elif kind == "json":
+            txt.tag_configure("json_key",    foreground="#61AFEF")
+            txt.tag_configure("json_string", foreground="#98C379")
+            txt.tag_configure("json_number", foreground="#D19A66")
+            txt.tag_configure("json_bool",   foreground="#C678DD")
+            txt.tag_configure("json_null",   foreground="#E06C75")
+            for tag in ["json_key", "json_string", "json_number", "json_bool", "json_null"]:
+                txt.tag_raise(tag)
+
+    def _clear_tags(self, widget, tags):
+        txt = self._text_widget(widget)
+        for tag in tags:
+            txt.tag_remove(tag, "1.0", "end")
+
+    def _highlight_python(self, widget):
+        import keyword as kw
+        import tokenize
+        import io
+
+        txt = self._text_widget(widget)
+        content = txt.get("1.0", "end-1c")
+        # print(f"[DEBUG] highlight_python chamado, conteúdo: {repr(content[:80])}")
+
+        if not content.strip():
+            # print("[DEBUG] conteúdo vazio, saindo")
+            return
+
+        self._setup_tags(widget, "python")
+        self._clear_tags(widget, ["py_keyword", "py_string", "py_comment", "py_number", "py_builtin"])
+
+        BUILTINS = {
+            "print", "len", "range", "str", "int", "float", "list",
+            "dict", "tuple", "set", "bool", "type", "isinstance",
+            "hasattr", "getattr", "setattr", "open", "json",
+            "request", "response", "env", "self", "cls",
+        }
+
+        try:
+            tokens = list(tokenize.generate_tokens(io.StringIO(content).readline))
+            # print(f"[DEBUG] tokens gerados: {len(tokens)}")
+        except tokenize.TokenError as e:
+            # print(f"[DEBUG] TokenError: {e}")
+            tokens = []
+
+        for tok_type, tok_str, tok_start, tok_end, _ in tokens:
+            row_s, col_s = tok_start
+            row_e, col_e = tok_end
+            start = f"{row_s}.{col_s}"
+            end   = f"{row_e}.{col_e}"
+
+            tag = None
+            if tok_type == tokenize.COMMENT:
+                tag = "py_comment"
+            elif tok_type == tokenize.STRING:
+                tag = "py_string"
+            elif tok_type == tokenize.NUMBER:
+                tag = "py_number"
+            elif tok_type == tokenize.NAME:
+                if tok_str in kw.kwlist:
+                    tag = "py_keyword"
+                elif tok_str in BUILTINS:
+                    tag = "py_builtin"
+
+            if tag:
+                # print(f"[DEBUG] aplicando tag '{tag}' em {start}→{end} para '{tok_str}'")
+                txt.tag_add(tag, start, end)
+                txt.tag_raise(tag)
+
+    def _highlight_json(self, widget):
+        import json as _json
+
+        txt = self._text_widget(widget)
+        self._setup_tags(widget, "json")
+        self._clear_tags(widget, ["json_key", "json_string", "json_number", "json_bool", "json_null"])
+
+        content = txt.get("1.0", "end-1c")
+        if not content.strip():
+            return
+
+        # Usa o scanner do json para tokenizar com segurança
+        PATTERNS = [
+            # chave
+            ("json_key",    r'"[^"]*"(?=\s*:)'),
+            # string valor
+            ("json_string", r'(?<=:\s)"[^"]*"'),
+            # número
+            ("json_number", r'(?<!["\w])-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?(?![\w"])'),
+            # bool
+            ("json_bool",   r'\b(?:true|false)\b'),
+            # null
+            ("json_null",   r'\bnull\b'),
+        ]
+
+        for tag, raw_pattern in PATTERNS:
+            try:
+                for m in re.finditer(raw_pattern, content):
+                    # calcula linha e coluna a partir do offset
+                    before = content[:m.start()]
+                    row = before.count("\n") + 1
+                    col = m.start() - (before.rfind("\n") + 1)
+                    end_before = content[:m.end()]
+                    end_row = end_before.count("\n") + 1
+                    end_col = m.end() - (end_before.rfind("\n") + 1)
+                    txt.tag_add(tag, f"{row}.{col}", f"{end_row}.{end_col}")
+            except re.PatternError:
+                pass
+
+    def _highlight_request_body(self):
+        if self.body_type_var.get() == "json":
+            self._highlight_json(self.body_text)
+        else:
+            self._clear_tags(
+                self.body_text,
+                ["json_key", "json_string", "json_number", "json_bool", "json_null"]
+            )

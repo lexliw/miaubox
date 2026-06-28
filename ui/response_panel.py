@@ -1,6 +1,9 @@
+from ui.syntax_highlight import highlight_json
 import customtkinter as ctk
 import json
 from ui.styles import DARK, status_color
+import re
+import keyword
 
 
 class ResponsePanel(ctk.CTkFrame):
@@ -96,7 +99,7 @@ class ResponsePanel(ctk.CTkFrame):
         else:
             pretty = result["raw"]
         self._raw = result["raw"]
-        self._set_body(pretty)
+        self._set_body(pretty, json_mode=(result["body"] is not None))
 
         headers_text = "\n".join(f"{k}: {v}" for k, v in result["headers"].items())
         self.headers_text.configure(state="normal")
@@ -104,10 +107,15 @@ class ResponsePanel(ctk.CTkFrame):
         self.headers_text.insert("1.0", headers_text)
         self.headers_text.configure(state="disabled")
 
-    def _set_body(self, text: str):
+    def _set_body(self, text: str, json_mode: bool = False):
         self.body_text.configure(state="normal")
         self.body_text.delete("1.0", "end")
         self.body_text.insert("1.0", text)
+
+        self._highlighted_json = json_mode
+        if json_mode:
+            self._highlight_json(self.body_text)
+
         self.body_text.configure(state="disabled")
 
     def _save_response(self):
@@ -119,3 +127,46 @@ class ResponsePanel(ctk.CTkFrame):
         if path:
             with open(path, "w", encoding="utf-8") as f:
                 f.write(self._raw)
+
+    def _text_widget(self, widget):
+        return getattr(widget, "_textbox", widget)
+
+    def _setup_json_tags(self, widget):
+        txt = self._text_widget(widget)
+        txt.tag_configure("json_key",    foreground="#61AFEF")
+        txt.tag_configure("json_string", foreground="#98C379")
+        txt.tag_configure("json_number", foreground="#D19A66")
+        txt.tag_configure("json_bool",   foreground="#C678DD")
+        txt.tag_configure("json_null",   foreground="#E06C75")
+
+    def _highlight_json(self, widget):
+        txt = self._text_widget(widget)
+        self._setup_json_tags(widget)
+
+        for tag in ["json_key", "json_string", "json_number", "json_bool", "json_null"]:
+            txt.tag_remove(tag, "1.0", "end")
+
+        content = txt.get("1.0", "end-1c")
+        if not content.strip():
+            return
+
+        PATTERNS = [
+            ("json_key",    r'"[^"]*"(?=\s*:)'),
+            ("json_string", r'(?<=:\s)"[^"]*"'),
+            ("json_number", r'(?<!["\w])-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?(?![\w"])'),
+            ("json_bool",   r'\b(?:true|false)\b'),
+            ("json_null",   r'\bnull\b'),
+        ]
+
+        for tag, raw_pattern in PATTERNS:
+            try:
+                for m in re.finditer(raw_pattern, content):
+                    before = content[:m.start()]
+                    row = before.count("\n") + 1
+                    col = m.start() - (before.rfind("\n") + 1)
+                    end_before = content[:m.end()]
+                    end_row = end_before.count("\n") + 1
+                    end_col = m.end() - (end_before.rfind("\n") + 1)
+                    txt.tag_add(tag, f"{row}.{col}", f"{end_row}.{end_col}")
+            except re.PatternError:
+                pass
